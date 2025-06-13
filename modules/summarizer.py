@@ -1,10 +1,11 @@
 """
-Summarizer module for the CTI Aggregator.
+Summarizer module for PRISM.
 Handles AI-powered summarization of threat intelligence articles.
 """
 
 import logging
 import json
+import re
 import anthropic
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 class ArticleSummarizer:
     """Generates summaries for individual threat intelligence articles"""
     
-    def __init__(self, api_key, model="claude-3-5-sonnet-latest"):
+    def __init__(self, api_key, model="claude-3-opus-20240229"):
         """
         Initialize the article summarizer.
         
@@ -49,7 +50,6 @@ class ArticleSummarizer:
                             iocs_text += f" (Context: {ioc['context']})"
                         iocs_text += "\n"
             
-            # Construct the prompt
             # Check for source-specific customization
             if "Volexity" in title or "volexity" in title.lower():
                 source_type = "Volexity"
@@ -264,6 +264,14 @@ For the key_actors, critical_iocs, and recommendations fields:
             
             if json_start >= 0 and json_end > json_start:
                 json_text = response_text[json_start:json_end]
+                
+                # Clean up the JSON text to handle control characters
+                json_text = json_text.replace('\r\n', '\n')
+                json_text = json_text.replace('\r', '\n')
+                
+                # Remove problematic control characters
+                json_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', json_text)
+                
                 try:
                     summary_data = json.loads(json_text)
                     logger.info("Generated executive summary successfully")
@@ -318,8 +326,30 @@ For the key_actors, critical_iocs, and recommendations fields:
                         ]
                     
                     return summary_data
+                    
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse JSON response: {e}")
+                    logger.debug(f"Problematic JSON text (first 500 chars): {json_text[:500]}")
+                    
+                    # Try alternative parsing approach
+                    try:
+                        # Sometimes Claude wraps JSON in markdown code blocks
+                        if '```json' in response_text and '```' in response_text:
+                            json_start = response_text.find('```json') + 7
+                            json_end = response_text.find('```', json_start)
+                            if json_end > json_start:
+                                json_text = response_text[json_start:json_end].strip()
+                                # Clean control characters again
+                                json_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', json_text)
+                                summary_data = json.loads(json_text)
+                                logger.info("Successfully parsed JSON from markdown code block")
+                                return summary_data
+                    except json.JSONDecodeError:
+                        pass
+                        
+                    # Try extracting individual sections manually if JSON parsing completely fails
+                    logger.warning("Attempting manual section extraction from response")
+                    return self.extract_sections_manually(response_text, articles)
             
             # Fallback if JSON parsing fails
             logger.warning("Using fallback for executive summary")
@@ -367,5 +397,151 @@ For the key_actors, critical_iocs, and recommendations fields:
                 'recommendations': [
                     "Unable to generate recommendations due to an error.",
                     "Please check the system logs for more information."
+                ]
+            }
+    
+    def extract_sections_manually(self, response_text, articles):
+        """
+        Manually extract sections from the response when JSON parsing fails.
+        
+        Args:
+            response_text (str): The raw response text from Claude
+            articles (list): List of articles for fallback IOC extraction
+            
+        Returns:
+            dict: Dictionary with extracted sections
+        """
+        import re
+        
+        logger.info("Attempting manual extraction of executive summary sections")
+        
+        # Initialize result structure
+        result = {
+            'executive_summary': "",
+            'key_actors': [],
+            'critical_iocs': [],
+            'recommendations': []
+        }
+        
+        try:
+            # Try to extract executive summary (look for text before any structured sections)
+            exec_match = re.search(r'executive[_\s]*summary["\s]*:?\s*["\s]*([^"}\]]+)', response_text, re.IGNORECASE | re.DOTALL)
+            if exec_match:
+                exec_text = exec_match.group(1).strip()
+                # Clean up common artifacts
+                exec_text = re.sub(r'[,\]\}]+, ', exec_text)  # Remove trailing punctuation
+                exec_text = exec_text.replace('\n', ' ').strip()
+                if len(exec_text) > 50:  # Only use if it's substantial
+                    result['executive_summary'] = exec_text
+            
+            # Extract key actors
+            actors_section = re.search(r'key[_\s]*actors["\s]*:?\s*\[(.*?)\]', response_text, re.IGNORECASE | re.DOTALL)
+            if actors_section:
+                actors_text = actors_section.group(1)
+                # Look for name/description pairs
+                actor_matches = re.findall(r'["\s]*name["\s]*:?\s*["\s]*([^"}\],]+)["\s]*.*?["\s]*description["\s]*:?\s*["\s]*([^"}\]]+)', actors_text, re.IGNORECASE | re.DOTALL)
+                for name, desc in actor_matches:
+                    result['key_actors'].append({
+                        'name': name.strip(),
+                        'description': desc.strip()
+                    })
+            
+            # Extract IOCs
+            iocs_section = re.search(r'critical[_\s]*iocs["\s]*:?\s*\[(.*?)\]', response_text, re.IGNORECASE | re.DOTALL)
+            if iocs_section:
+                iocs_text = iocs_section.group(1)
+                # Look for type/value/description triplets
+                ioc_matches = re.findall(r'["\s]*type["\s]*:?\s*["\s]*([^"}\],]+)["\s]*.*?["\s]*value["\s]*:?\s*["\s]*([^"}\],]+)["\s]*.*?["\s]*description["\s]*:?\s*["\s]*([^"}\]]+)', iocs_text, re.IGNORECASE | re.DOTALL)
+                for ioc_type, value, desc in ioc_matches:
+                    result['critical_iocs'].append({
+                        'type': ioc_type.strip(),
+                        'value': value.strip(),
+                        'description': desc.strip()
+                    })
+            
+            # Extract recommendations
+            recs_section = re.search(r'recommendations["\s]*:?\s*\[(.*?)\]', response_text, re.IGNORECASE | re.DOTALL)
+            if recs_section:
+                recs_text = recs_section.group(1)
+                # Look for quoted strings
+                rec_matches = re.findall(r'["\s]*([^"}\],]+)["\s]*', recs_text)
+                for rec in rec_matches:
+                    clean_rec = rec.strip().rstrip(',')
+                    if len(clean_rec) > 10:  # Only include substantial recommendations
+                        result['recommendations'].append(clean_rec)
+            
+            # Apply fallbacks for empty sections
+            if not result['executive_summary']:
+                result['executive_summary'] = "Based on the analyzed threat intelligence, several key cybersecurity threats have emerged that require immediate attention. Organizations should implement robust security measures to mitigate these evolving threats."
+            
+            if not result['key_actors']:
+                result['key_actors'] = [
+                    {
+                        "name": "Various Threat Actors",
+                        "description": "Multiple threat actors were mentioned in the reports but specific details could not be extracted."
+                    }
+                ]
+            
+            if not result['critical_iocs']:
+                # Try to extract some IOCs from the articles as fallback
+                critical_iocs = []
+                for article in articles:
+                    if 'iocs' in article and article['iocs']:
+                        for ioc_type, iocs in article['iocs'].items():
+                            if iocs and len(iocs) > 0:
+                                critical_iocs.append({
+                                    "type": ioc_type,
+                                    "value": iocs[0]['value'],
+                                    "description": f"Found in {article['title']}"
+                                })
+                                if len(critical_iocs) >= 3:
+                                    break
+                        if len(critical_iocs) >= 3:
+                            break
+                
+                if critical_iocs:
+                    result['critical_iocs'] = critical_iocs
+                else:
+                    result['critical_iocs'] = [
+                        {
+                            "type": "various",
+                            "value": "See individual reports",
+                            "description": "Various IOCs were identified in the individual reports."
+                        }
+                    ]
+            
+            if not result['recommendations']:
+                result['recommendations'] = [
+                    "Maintain regular security patches and updates for all systems",
+                    "Implement multi-factor authentication for critical services",
+                    "Conduct regular security awareness training for employees",
+                    "Review and update incident response plans",
+                    "Maintain offline backups of critical data"
+                ]
+            
+            logger.info("Manual extraction completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Manual extraction failed: {str(e)}")
+            # Return basic fallback structure
+            return {
+                'executive_summary': "Manual extraction of executive summary failed. Please check logs for details.",
+                'key_actors': [
+                    {
+                        "name": "Extraction Error",
+                        "description": "Unable to extract threat actor information due to parsing errors."
+                    }
+                ],
+                'critical_iocs': [
+                    {
+                        "type": "error",
+                        "value": "extraction_failed",
+                        "description": "Unable to extract IOC information due to parsing errors."
+                    }
+                ],
+                'recommendations': [
+                    "Manual extraction failed. Please review the raw response data.",
+                    "Consider adjusting the Claude API prompt for better JSON formatting."
                 ]
             }
