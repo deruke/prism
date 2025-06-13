@@ -84,7 +84,7 @@ python main.py --analyze
 To create an executive summary report from recent intelligence:
 
 ```bash
-python main.py --report
+python prism.py --report
 ```
 
 ### Complete workflow
@@ -92,7 +92,7 @@ python main.py --report
 To run the entire workflow (scrape, analyze, and report) in a single command:
 
 ```bash
-python main.py --full-run
+python prism.py --full-run
 ```
 
 ### Help
@@ -100,7 +100,7 @@ python main.py --full-run
 To see all available options:
 
 ```bash
-python main.py --help
+python prism.py --help
 ```
 
 ## Configuration
