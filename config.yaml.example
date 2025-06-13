@@ -1,0 +1,58 @@
+# Configuration for PRISM (Predictive Reconnaissance & Intelligence Security Monitoring)
+
+# Database settings
+database:
+  path: data/prism.db  # Path to SQLite database file
+
+# Sources to scrape for threat intelligence
+sources:
+  # RSS feed sources
+  - name: Krebs on Security
+    url: https://krebsonsecurity.com
+    type: rss
+    feed_url: https://krebsonsecurity.com/feed/
+    
+  - name: Bleeping Computer
+    url: https://www.bleepingcomputer.com
+    type: rss
+    feed_url: https://www.bleepingcomputer.com/feed/
+    
+  - name: The Hacker News
+    url: https://thehackernews.com
+    type: rss
+    feed_url: https://feeds.feedburner.com/TheHackersNews
+    
+  - name: ThreatPost
+    url: https://threatpost.com
+    type: rss
+    feed_url: https://threatpost.com/feed/
+    
+  # Web page sources
+  - name: CISA Alerts
+    url: https://www.cisa.gov/news-events/cybersecurity-advisories
+    type: web
+    article_selector: a.usa-link
+    content_selector: div.usa-prose
+    url_include_patterns:
+      - /cybersecurity-advisories/
+      
+  - name: Microsoft Security Blog
+    url: https://www.microsoft.com/en-us/security/blog
+    type: web
+    article_selector: h3.c-heading-4 a
+    content_selector: div.c-content-card
+    
+  - name: Volexity Blog
+    url: https://www.volexity.com/blog/
+    type: rss
+    feed_url: https://www.volexity.com/blog/feed/
+
+# AI settings for summarization
+ai:
+  api_key: YOUR_ANTHROPIC_API_KEY_HERE
+  model: claude-3-opus-20240229
+
+# Reporting settings
+reporting:
+  output_directory: reports
+  time_window_days: 30  # How many days of data to include in reports
