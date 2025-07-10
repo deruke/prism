@@ -68,7 +68,7 @@ The Cyber Threat Intelligence Aggregator can be run in several modes:
 To collect new threat intelligence from the configured sources:
 
 ```bash
-python main.py --scrape
+python prism.py --scrape
 ```
 
 ### Analyze intelligence
@@ -76,7 +76,7 @@ python main.py --scrape
 To generate AI summaries for articles that don't have summaries yet:
 
 ```bash
-python main.py --analyze
+python prism.py --analyze
 ```
 
 ### Generate report
