@@ -23,8 +23,8 @@ A Python-based tool to aggregate data from multiple cyber threat intelligence so
 1. Clone the repository or download the source code:
 
 ```bash
-git clone https://github.com/yourusername/cti-aggregator.git
-cd cti-aggregator
+git clone https://github.com/deruke/prism 
+cd prism 
 ```
 
 2. Create a virtual environment (recommended):
